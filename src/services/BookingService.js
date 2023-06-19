@@ -2,53 +2,92 @@ const { BookingRepo } = require("../repositories/index");
 const { Logger, ServerConfig } = require("../config");
 const { AppError } = require("../utils/index");
 const { StatusCodes } = require("http-status-codes");
+const { successResponse, errorResponse } = require("../utils/common");
 const axios = require("axios");
 const db = require("../models");
 
 const Bookingrepo = new BookingRepo();
 
 async function CreateBooking(data) {
-  const transactionObj = await db.sequelize.transaction();
+    console.log("inside service data  :", data);
+    const transactionObj = await db.sequelize.transaction();
 
-  try {
-    const flight = await axios.get(
-      `${ServerConfig.FLIGHT_SERVICE}/api/v1/flight/${data.flightId}`
-    );
-    const flightData = flight.data.data;
+    try {
+        const flight = await axios.get(
+            `${ServerConfig.FLIGHT_SERVICE}/api/v1/flight/${data.flightId}`
+        );
+        const flightData = flight.data.data;
 
-    //1 : checks
-    if (data.noofSeats > flightData.totalSeats) {
-      throw new AppError("No enough seats available", StatusCodes.BAD_REQUEST);
+        //1 : checks
+        if (data.noOfSeats > flightData.totalSeats) {
+            throw new AppError("No enough seats available", StatusCodes.BAD_REQUEST);
+        }
+
+        //2 : price
+        const TotalBilling = flightData.price * data.noOfSeats;
+        const TotalData = {
+            ...data,
+            totalCost: TotalBilling,
+        }; // using spread operator and copying all the data and adding new key totalCost in new object
+
+        console.log("inside service Total Data  :", TotalData);
+
+        //3 : create booking
+        const responce = await Bookingrepo.create(TotalData, transactionObj);
+
+        //4 : updating the seats by passing data in callback
+        await axios.patch(
+            `${ServerConfig.FLIGHT_SERVICE}/api/v1/flight/${data.flightId}/seats`,
+            {
+                seats: TotalData.noOfSeats,
+            }
+        );
+
+        // 5 : commmit
+        await transactionObj.commit();
+
+        return responce;
+    } catch (error) {
+        // if anything fails transcation will rollback
+        await transactionObj.rollback();
+        throw error;
     }
+}
 
-    //2 : price
-    const TotalBilling = flightData.price * data.noofSeats;
-    const TotalData = {
-      ...data,
-      totalCost: TotalBilling,
-    }; // using spread operator and copying all the data and adding new key totalCost in new object
+async function makePayment(data) {
+    const transactionObj = await db.sequelize.transaction();
 
-    //3 : create booking
-    const responce = await Bookingrepo.create(TotalData, transactionObj);
+    try {
+        const bookingDetails = await Bookingrepo.get(data.bookingId, transactionObj);
+ console.log(bookingDetails)
+        const bookingTime = new Date(bookingDetails.createdAt);
+        const currentTime = new Date();
 
-    //4 : updating the seats by passing data in callback
-    await axios.patch(`${ServerConfig.FLIGHT_SERVICE}/api/v1/flight/${data.flightId}/seats`, {
-        seats: data.noofSeats
-    });
-    
+        if (currentTime - bookingTime > 300000) {
+            await Bookingrepo.update(data.bookingId, { status: 'CANCELLED' }, transactionObj)
+            throw new AppError("The booking time has been expired", StatusCodes.BAD_REQUEST);
+        }
 
-    // 5 : commmit
-    await transactionObj.commit();
+        if (bookingDetails.totalCost != data.totalCost) {
+            throw new AppError("The amount of the payment doesnt match", StatusCodes.BAD_REQUEST);
+        }
 
-    return responce;
+        if (bookingDetails.UserId != data.UserId) {
+            throw new AppError("The user corresponding to the booking doesnt match", StatusCodes.BAD_REQUEST);
+        }
 
-  } catch (error) {
-    // if anything fails transcation will rollback
-    await transactionObj.rollback();
-    throw error;
-  }
+        await Bookingrepo.update(data.bookingId, { status: 'BOOKED' }, transactionObj)
+
+        await transactionObj.commit();
+return true;
+
+    } catch (error) {
+        await transactionObj.rollback();
+        throw error;
+    }
 }
 
 module.exports = {
-  CreateBooking,
+    CreateBooking,
+    makePayment
 };
