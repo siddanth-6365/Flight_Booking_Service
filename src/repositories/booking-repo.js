@@ -10,29 +10,69 @@ class BookingRepo extends CrudRepository {
   }
 
   async create(data, transactionObj) {
-    const responce = await Booking.create( data , {transaction:transactionObj});
+    const responce = await Booking.create(data, {
+      transaction: transactionObj,
+    });
     return responce;
   }
 
-  async get(data,transactionObj) {
-    const response = await this.model.findByPk(data, {transaction:transactionObj});
-    if(!response) {
-        throw new AppError('Not able to fund the resource', StatusCodes.NOT_FOUND);
+  async get(data, transactionObj) {
+    const response = await Booking.findByPk(data, {
+      transaction: transactionObj,
+    });
+    if (!response) {
+      throw new AppError(
+        "Not able to fund the resource",
+        StatusCodes.NOT_FOUND
+      );
     }
     return response;
-}
+  }
 
-async update(id, data , transactionObj) { 
-  const response = await this.model.update(data, {
-      where: {
-          id: id
-      }},
+  async update(id, data, transactionObj) {
+    const response = await Booking.update(
+      data,
       {
-        transaction:transactionObj
+        where: {
+          id: id,
+        },
+      },
+      {
+        transaction: transactionObj,
       }
-  )
-  return response;
-}
+    );
+    return response;
+  }
+
+  async cancelOldbookings(timestamp) {
+    const response = await Booking.update(
+      {
+        status: "CANCELLED",
+      },
+      {
+        where: {
+          [Op.and]: [
+            {
+              createdAt: {
+                [Op.lt]: timestamp,
+              },
+            },
+            {
+              status: {
+                [Op.ne]: "BOOKED",
+              },
+            },
+            {
+              status: {
+                [Op.ne]: "CANCELLED",
+              },
+            },
+          ],
+        },
+      }
+    );
+    return response;
+  }
 }
 
-module.exports = BookingRepo
+module.exports = BookingRepo;
