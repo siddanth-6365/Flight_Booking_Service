@@ -1,5 +1,5 @@
 const { BookingRepo } = require("../repositories/index");
-const { Logger, ServerConfig } = require("../config");
+const { Logger, ServerConfig , Queue } = require("../config");
 const { AppError } = require("../utils/index");
 const { StatusCodes } = require("http-status-codes");
 const { successResponse, errorResponse } = require("../utils/common");
@@ -87,13 +87,16 @@ async function makePayment(data) {
       );
     }
 
-    await Bookingrepo.update(
-      data.bookingId,
-      { status: "BOOKED" },
-      transactionObj
-    );
+    await Bookingrepo.update( data.bookingId,  { status: "BOOKED" },  transactionObj );
 
     await transactionObj.commit();
+
+    await  Queue.sendData({
+      recepientEmail: 'siddanthe.edu@gmail.com', // for now we are manually writing recepient email further we will fetch from user
+      subject: 'Flight booked',
+      text: `Booking successfully done for the booking ${data.bookingId}`
+  });
+
     return true;
   } catch (error) {
     await transactionObj.rollback();
